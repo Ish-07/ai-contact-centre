@@ -1,0 +1,80 @@
+version: '3.8'
+
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    container_name: contact_center_postgres
+    restart: always
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgrespassword
+      POSTGRES_DB: contact_center_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d contact_center_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: contact_center_backend
+    restart: always
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=postgresql://postgres:postgrespassword@db:5432/contact_center_db
+      - AI_PROVIDER=mock
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      - GEMINI_MODEL=gemini-2.5-flash
+      - SECRET_KEY=${SECRET_KEY:-supersecretkey-change-in-production-min32chars}
+      - STORAGE_DIR=/storage
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - ./storage:/storage
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+  seed:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: contact_center_seed
+    environment:
+      - DATABASE_URL=postgresql://postgres:postgrespassword@db:5432/contact_center_db
+      - AI_PROVIDER=mock
+      - SECRET_KEY=${SECRET_KEY:-supersecretkey-change-in-production-min32chars}
+      - STORAGE_DIR=/storage
+    depends_on:
+      backend:
+        condition: service_healthy
+    volumes:
+      - ./storage:/storage
+    command: ["python", "scripts/seed_data.py"]
+    restart: 'no'
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: contact_center_frontend
+    restart: always
+    ports:
+      - "3000:80"
+    depends_on:
+      - backend
+
+volumes:
+  pgdata:
